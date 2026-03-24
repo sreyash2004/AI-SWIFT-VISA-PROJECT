@@ -1,42 +1,26 @@
-# retrievalout.py
-from langchain_huggingface import HuggingFaceEmbeddings
+# retrieval.py
+
 from langchain_community.vectorstores import FAISS
-from langchain.schema import Document
+from langchain_community.embeddings import HuggingFaceEmbeddings
+
 
 # --------------------------
-# EMBEDDING MODEL
+# LOAD EMBEDDING MODEL
 # --------------------------
 embedding_model = HuggingFaceEmbeddings(
     model_name="sentence-transformers/all-MiniLM-L6-v2"
 )
 
-# --------------------------
-# EXAMPLE VISA DOCUMENTS
-# Replace/add your visa rules here
-# --------------------------
-visa_docs = [
-    Document(
-        page_content="US Student Visa eligibility: Must have admission letter from a US university. Financial proof required.",
-        metadata={"country": "US", "visa_type": "Student Visa"}
-    ),
-    Document(
-        page_content="US Work Visa: Requires job offer and labor certification.",
-        metadata={"country": "US", "visa_type": "Work Visa"}
-    ),
-    Document(
-        page_content="Canada Work Visa: Requires job offer from Canadian employer and language test results.",
-        metadata={"country": "Canada", "visa_type": "Work Visa"}
-    ),
-    Document(
-        page_content="Canada Student Visa: Must have admission letter from Canadian university. Financial proof required.",
-        metadata={"country": "Canada", "visa_type": "Student Visa"}
-    ),
-]
 
 # --------------------------
-# BUILD FAISS INDEX IN MEMORY
+# LOAD FAISS INDEX
 # --------------------------
-db = FAISS.from_documents(visa_docs, embedding_model)
+db = FAISS.load_local(
+    "faiss_index",
+    embedding_model,
+    allow_dangerous_deserialization=True
+)
+
 
 # --------------------------
 # SYNONYM MAP
@@ -47,8 +31,9 @@ VISA_SYNONYMS = {
     "family visa": ["dependent visa", "spouse visa", "partner visa"]
 }
 
+
 # --------------------------
-# HELPER FUNCTIONS
+# DETECTION HELPERS
 # --------------------------
 def detect_country(query_lower, all_countries):
     for country in all_countries:
@@ -56,23 +41,34 @@ def detect_country(query_lower, all_countries):
             return country
     return None
 
+
 def detect_visa(query_lower, all_visa_types):
     for visa in all_visa_types:
         visa_lower = visa.lower()
+
+        # Direct match
         if visa_lower in query_lower:
             return visa
+
+        # Synonym match
         if visa_lower in VISA_SYNONYMS:
             for synonym in VISA_SYNONYMS[visa_lower]:
                 if synonym in query_lower:
                     return visa
+
     return None
 
+
 # --------------------------
-# DOCUMENT RETRIEVAL FUNCTION
+# RETRIEVAL FUNCTION
 # --------------------------
 def retrieve_documents(query, k=3):
+
+    print("\n===== RETRIEVAL STARTED =====")
+
     query_lower = query.lower()
 
+    # Extract metadata from FAISS
     all_countries = set(
         doc.metadata.get("country")
         for doc in db.docstore._dict.values()
@@ -88,21 +84,95 @@ def retrieve_documents(query, k=3):
     detected_country = detect_country(query_lower, all_countries)
     detected_visa = detect_visa(query_lower, all_visa_types)
 
+    print("Detected Country:", detected_country)
+    print("Detected Visa Type:", detected_visa)
+
+    # --------------------------
+    # STRICT COUNTRY CHECK
+    # --------------------------
     if not detected_country:
+        print("❌ Country not found in database.")
+        print("===== RETRIEVAL ENDED =====\n")
         return []
 
+    # --------------------------
+    # BUILD FILTER
+    # --------------------------
     search_filter = {"country": detected_country}
+
+    # Visa optional — if detected, include it
     if detected_visa:
         search_filter["visa_type"] = detected_visa
+    else:
+        print("⚠ Visa type not detected. Searching by country only.")
 
-    results_with_scores = db.similarity_search_with_score(query, k=k, filter=search_filter)
+    # --------------------------
+    # FILTERED SEARCH ONLY
+    # --------------------------
+    results_with_scores = db.similarity_search_with_score(
+        query, k=k, filter=search_filter
+    )
+
     if not results_with_scores:
+        print("No documents retrieved.")
+        print("===== RETRIEVAL ENDED =====\n")
         return []
 
+    print("\nRetrieved Chunks:\n")
+
+    for i, (doc, score) in enumerate(results_with_scores, 1):
+        print(f"--- Chunk {i} ---")
+        print("Score:", round(score, 4))
+        print("Metadata:", doc.metadata)
+        print("-" * 50)
+
+    print("===== RETRIEVAL ENDED =====\n")
+
+    # --------------------------
+    # SAFER BEST CHUNK LOGIC
+    # --------------------------
     best_doc, best_score = results_with_scores[0]
+
     if len(results_with_scores) > 1:
         second_score = results_with_scores[1][1]
-        if abs(best_score - second_score) < 0.05:
+        score_gap = second_score - best_score
+
+        print("Score Gap:", round(score_gap, 4))
+
+        if score_gap < 0.05:
+            print("⚠ Close match detected. Passing 2 chunks.")
             return [results_with_scores[0][0], results_with_scores[1][0]]
 
     return [best_doc]
+
+
+# --------------------------
+# MAIN TEST MODE
+# --------------------------
+def main():
+
+    print("=== SAFE RETRIEVAL TEST MODE ===")
+
+    while True:
+        query = input("\nEnter query (type 'exit' to quit): ")
+
+        if query.lower() == "exit":
+            break
+
+        docs = retrieve_documents(query)
+
+        if not docs:
+            print("No relevant documents found.")
+            continue
+
+        print("\n===== CHUNK(S) PASSED TO LLM =====\n")
+
+        for i, doc in enumerate(docs, 1):
+            print(f"--- Selected Chunk {i} ---")
+            print("Metadata:", doc.metadata)
+            print("Content:\n", doc.page_content)
+            print("-" * 60)
+
+
+if __name__ == "__main__":
+    main()
