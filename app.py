@@ -1,20 +1,16 @@
 # app.py
 import streamlit as st
-from retrieval import retrieve_documents
+from retrieval_temp import retrieve_documents
 
-st.set_page_config(page_title="SwiftVisa", layout="centered")
-st.title("🌏 SwiftVisa AI - Visa Eligibility Helper")
+st.title("SwiftVisa Demo (Temporary)")
 
-query = st.text_input("Ask about a visa (e.g., 'Student visa for Germany'):")
+query = st.text_input("Ask about any visa:")
 
 if query:
     results = retrieve_documents(query)
-
-    if results:
-        st.subheader("Relevant Information:")
-        for i, doc in enumerate(results, 1):
-            st.markdown(f"**Chunk {i}**")
-            st.write(doc.page_content)
-            st.write("---")
+    if not results:
+        st.warning("No documents found. Try another query.")
     else:
-        st.warning("No relevant visa information found for your query.")
+        for i, doc in enumerate(results, 1):
+            st.subheader(f"{i}. {doc.country} — {doc.visa_type}")
+            st.write(doc.content)
