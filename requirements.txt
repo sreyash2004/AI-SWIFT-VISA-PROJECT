@@ -1,4 +1,6 @@
 streamlit
 langchain-community
+langchain-huggingface
 sentence-transformers
 faiss-cpu
+torch
