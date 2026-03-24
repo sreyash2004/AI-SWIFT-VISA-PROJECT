@@ -13,7 +13,7 @@ embedding_model = HuggingFaceEmbeddings(
 # LOAD FAISS INDEX
 # --------------------------
 db = FAISS.load_local(
-    "faiss_index",              # path to your FAISS index folder
+    "index.faiss",              # path to your FAISS index folder
     embedding_model,
     allow_dangerous_deserialization=True
 )
